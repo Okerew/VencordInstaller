@@ -51,6 +51,7 @@ func main() {
 	var installFlag = flag.Bool("install", false, "Install Vencord")
 	var updateFlag = flag.Bool("repair", false, "Repair Vencord")
 	var uninstallFlag = flag.Bool("uninstall", false, "Uninstall Vencord")
+	var repairAutoFlag = flag.Bool("repair-auto", false, "Repair Vencord automatically (no prompts)")
 	var installOpenAsarFlag = flag.Bool("install-openasar", false, "Install OpenAsar")
 	var uninstallOpenAsarFlag = flag.Bool("uninstall-openasar", false, "Uninstall OpenAsar")
 	var locationFlag = flag.String("location", "", "The location of the Discord install to modify")
@@ -88,14 +89,15 @@ func main() {
 		die("The 'branch' flag must be one of the following: [auto|stable|ptb|canary]")
 	}
 
-	if *installFlag || *updateFlag {
+	if *installFlag || *updateFlag || *repairAutoFlag {
+		action := Ternary(*installFlag, "installing", Ternary(*updateFlag, "repairing", "repairing"))
 		if !<-GithubDoneChan {
-			die("Not " + Ternary(*installFlag, "installing", "updating") + " as fetching release data failed")
+			die("Not " + action + " as fetching release data failed")
 		}
 	}
 
-	install, uninstall, update, installOpenAsar, uninstallOpenAsar := *installFlag, *uninstallFlag, *updateFlag, *installOpenAsarFlag, *uninstallOpenAsarFlag
-	switches := []*bool{&install, &update, &uninstall, &installOpenAsar, &uninstallOpenAsar}
+	install, uninstall, update, repairAuto, installOpenAsar, uninstallOpenAsar := *installFlag, *uninstallFlag, *updateFlag, *repairAutoFlag, *installOpenAsarFlag, *uninstallOpenAsarFlag
+	switches := []*bool{&install, &update, &repairAuto, &uninstall, &installOpenAsar, &uninstallOpenAsar}
 	if !SliceContainsFunc(switches, func(b *bool) bool { return *b }) {
 		interactive = true
 
@@ -153,6 +155,27 @@ func main() {
 		if err == nil {
 			errSilent = PromptDiscord("repair", *locationFlag, *branchFlag).patch()
 		}
+	} else if repairAuto {
+		Log.Info("Downloading latest Vencord files...")
+		if err := installLatestBuilds(); err != nil {
+			Log.Error("Failed to download latest builds:", err)
+			exitFailure()
+		}
+		Log.Info("Done!")
+		patched := 0
+		for _, d := range discords {
+			install := d.(*DiscordInstall)
+			Log.Info("Patching", install.branch, "at", install.path)
+			if err := install.patch(); err != nil {
+				Log.Warn("Failed to patch", install.branch+":", err)
+			} else {
+				patched++
+			}
+		}
+		if patched == 0 {
+			die("No Discord installs were patched")
+		}
+		Log.Info("Successfully patched", patched, "Discord install(s)")
 	} else if installOpenAsar {
 		discord := PromptDiscord("patch", *locationFlag, *branchFlag)
 		if !discord.IsOpenAsar() {
