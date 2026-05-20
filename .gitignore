@@ -3,3 +3,4 @@ vencordinstaller
 *.syso
 *.old
 vencord_cli
+.DS_Store
